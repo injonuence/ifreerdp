@@ -29,6 +29,12 @@
 	                                                                    pathForResource:@"Defaults"
 	                                                                             ofType:@"plist"]]];
 
+	// system bars pick up the Liquid Glass look on iOS 26 and fall back to their
+	// translucent standard style on older systems
+	[[UITabBar appearance] setTintColor:[UIColor systemBlueColor]];
+	[[UINavigationBar appearance] setTintColor:[UIColor systemBlueColor]];
+	[[UIToolbar appearance] setTintColor:[UIColor whiteColor]];
+
 	// init global settings
 	SetSwapMouseButtonsFlag(
 	    [[NSUserDefaults standardUserDefaults] boolForKey:@"ui.swap_mouse_buttons"]);

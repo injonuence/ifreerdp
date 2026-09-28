@@ -19,6 +19,7 @@
 #define SECTION_SESSIONS 0
 #define SECTION_BOOKMARKS 1
 #define NUM_SECTIONS 2
+#define MAX_QUICK_CONNECT_HISTORY_ENTRIES 30
 
 @interface BookmarkListController (Private)
 #pragma mark misc functions
@@ -919,6 +920,12 @@
 
 - (void)writeConnectionHistoryToDataStore
 {
+	// keep the quick connect history bounded, dropping the oldest entries first
+	if ([_connection_history count] > MAX_QUICK_CONNECT_HISTORY_ENTRIES)
+		[_connection_history
+		    removeObjectsInRange:NSMakeRange(0, [_connection_history count] -
+		                                          MAX_QUICK_CONNECT_HISTORY_ENTRIES)];
+
 	[self writeArray:_connection_history toDataStoreURL:[self connectionHistoryDataStoreURL]];
 }
 

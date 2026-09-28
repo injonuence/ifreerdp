@@ -8,6 +8,8 @@
  http://mozilla.org/MPL/2.0/.
  */
 
+#import <QuartzCore/QuartzCore.h>
+
 #import "AdvancedKeyboardView.h"
 #include <freerdp/locale/keyboard.h>
 
@@ -144,8 +146,19 @@ struct ButtonItem cursorKeysItems[24] = { { @"", KEY_SKIP },
 		_delegate = delegate;
 
 		self.autoresizingMask = UIViewAutoresizingFlexibleHeight | UIViewAutoresizingFlexibleWidth;
-		self.backgroundColor = [UIColor blackColor];
-		// Initialization code
+
+		// translucent glass backdrop the key views are layered on top of
+		UIVisualEffect *keyboard_effect = nil;
+		if (@available(iOS 26.0, *))
+			keyboard_effect = [[[UIGlassEffect alloc] init] autorelease];
+		if (keyboard_effect == nil)
+			keyboard_effect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleDark];
+		UIVisualEffectView *effect_view =
+		    [[[UIVisualEffectView alloc] initWithEffect:keyboard_effect] autorelease];
+		[effect_view setFrame:self.bounds];
+		[effect_view setAutoresizingMask:(UIViewAutoresizingFlexibleWidth |
+		                                UIViewAutoresizingFlexibleHeight)];
+		[self insertSubview:effect_view atIndex:0];
 
 		[self initCursorKeysView];
 		[self initNumPadKeysView];
@@ -167,31 +180,6 @@ struct ButtonItem cursorKeysItems[24] = { { @"", KEY_SKIP },
     // Drawing code
 }
 */
-
-- (void)drawRect:(CGRect)rect
-{
-	// draw a nice background gradient
-	CGContextRef currentContext = UIGraphicsGetCurrentContext();
-
-	CGGradientRef glossGradient;
-	CGColorSpaceRef rgbColorspace;
-	size_t num_locations = 2;
-	CGFloat locations[2] = { 0.0, 1.0 };
-	CGFloat components[8] = { 1.0, 1.0, 1.0, 0.35,   // Start color
-		                      1.0, 1.0, 1.0, 0.06 }; // End color
-
-	rgbColorspace = CGColorSpaceCreateDeviceRGB();
-	glossGradient =
-	    CGGradientCreateWithColorComponents(rgbColorspace, components, locations, num_locations);
-
-	CGRect currentBounds = self.bounds;
-	CGPoint topCenter = CGPointMake(CGRectGetMidX(currentBounds), 0.0f);
-	CGPoint midCenter = CGPointMake(CGRectGetMidX(currentBounds), currentBounds.size.height);
-	CGContextDrawLinearGradient(currentContext, glossGradient, topCenter, midCenter, 0);
-
-	CGGradientRelease(glossGradient);
-	CGColorSpaceRelease(rgbColorspace);
-}
 
 - (void)dealloc
 {
@@ -250,6 +238,26 @@ struct ButtonItem cursorKeysItems[24] = { { @"", KEY_SKIP },
 #pragma mark -
 @implementation AdvancedKeyboardView (Private)
 
+// SF Symbols replacement for the bundled key icons; returns an empty name when no
+// symbol exists so the caller falls back to the bundled image
+- (NSString *)sfSymbolNameForKeyIconResource:(NSString *)resource_name
+{
+	static NSDictionary *symbol_map = nil;
+	if (symbol_map == nil)
+	{
+		symbol_map = [[NSDictionary alloc] initWithObjectsAndKeys:
+		                                               @"arrow.up.and.down", @"icon_key_arrows",
+		                                               @"contextualmenu.and.cursorarrow",
+		                                               @"icon_key_menu",
+		                                               @"delete.left", @"icon_key_backspace",
+		                                               @"return", @"icon_key_return", nil];
+	}
+	NSString *symbol_name = [symbol_map objectForKey:resource_name];
+	if (symbol_name == nil)
+		return @"";
+	return symbol_name;
+}
+
 - (UIView *)keyboardViewForItems:(struct ButtonItem *)items columns:(int)columns rows:(int)rows
 {
 	UIView *result_view = [[[UIView alloc] initWithFrame:self.bounds] autorelease];
@@ -271,9 +279,6 @@ struct ButtonItem cursorKeysItems[24] = { { @"", KEY_SKIP },
 	int dist_width = (result_view.bounds.size.width - (columns * btn_size.width)) / (columns + 1);
 	int dist_height = (result_view.bounds.size.height - (rows * btn_size.height)) / (rows + 1);
 
-	UIImage *btn_background_img = [UIImage
-	    imageWithContentsOfFile:[[NSBundle mainBundle] pathForResource:@"keyboard_button_background"
-	                                                            ofType:@"png"]];
 	for (int j = 0; j < rows; j++)
 	{
 		for (int i = 0; i < columns; i++)
@@ -285,7 +290,7 @@ struct ButtonItem cursorKeysItems[24] = { { @"", KEY_SKIP },
 				continue;
 
 			// create button, set autoresizing mask and add action handler
-			UIButton *btn = [UIButton buttonWithType:UIButtonTypeRoundedRect];
+			UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
 			[btn setAutoresizingMask:(UIViewAutoresizingFlexibleLeftMargin |
 			                          UIViewAutoresizingFlexibleRightMargin |
 			                          UIViewAutoresizingFlexibleTopMargin |
@@ -318,20 +323,26 @@ struct ButtonItem cursorKeysItems[24] = { { @"", KEY_SKIP },
 			// set button text or image parameters
 			if ([curItem->title hasPrefix:@"img:"] == YES)
 			{
-				UIImage *btn_image =
-				    [UIImage imageWithContentsOfFile:[[NSBundle mainBundle]
-				                                         pathForResource:[curItem->title
-				                                                             substringFromIndex:4]
-				                                                  ofType:@"png"]];
+				NSString *resource_name = [curItem->title substringFromIndex:4];
+				UIImage *btn_image = [UIImage
+				    systemImageNamed:[self sfSymbolNameForKeyIconResource:resource_name]];
+				if (btn_image == nil)
+					btn_image = [UIImage
+					    imageWithContentsOfFile:[[NSBundle mainBundle]
+					                             pathForResource:resource_name
+					                                  ofType:@"png"]];
 				[btn setImage:btn_image forState:UIControlStateNormal];
+				[btn setTintColor:[UIColor whiteColor]];
 			}
 			else
 			{
 				[btn setTitle:curItem->title forState:UIControlStateNormal];
-				[btn setTitleColor:[UIColor blackColor] forState:UIControlStateNormal];
+				[btn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+				[btn.titleLabel setFont:[UIFont systemFontOfSize:15 weight:UIFontWeightMedium]];
 			}
 
-			[btn setBackgroundImage:btn_background_img forState:UIControlStateNormal];
+			[btn setBackgroundColor:[UIColor colorWithWhite:1.0 alpha:0.14]];
+			[btn.layer setCornerRadius:8.0];
 			[btn setTag:curItem->tag];
 
 			// add button to view

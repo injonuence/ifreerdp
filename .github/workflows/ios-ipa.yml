@@ -1,0 +1,50 @@
+name: iOS unsigned ipa
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+      - main
+
+jobs:
+  build-ipa:
+    runs-on: macos-26
+    timeout-minutes: 100
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Restore build cache
+        uses: actions/cache@v4
+        with:
+          path: build/ios.client.build
+          key: ios-build-${{ runner.os }}-${{ hashFiles('client/iOS/**/CMakeLists.txt', 'client/iOS/cmake/*.cmake') }}
+          restore-keys: ios-build-
+
+      - name: Configure Xcode project
+        run: cmake -S client/iOS -B build/ios.client.build -DCMAKE_TOOLCHAIN_FILE="$PWD/cmake/ios.toolchain.cmake" -DPLATFORM=OS64 -DDEPLOYMENT_TARGET=15.0 -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED=NO -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY="" -G Xcode
+
+      - name: Build Release
+        run: cmake --build build/ios.client.build --config Release --parallel 3
+
+      - name: Package unsigned ipa
+        run: |
+          APP_BUNDLE=$(find build/ios.client.build -type d -name "iFreeRDP.app" -print -quit)
+          if [ -z "$APP_BUNDLE" ]; then
+            echo "iFreeRDP.app not found in build directory"
+            exit 1
+          fi
+          echo "Packaging $APP_BUNDLE"
+          mkdir Payload
+          cp -R "$APP_BUNDLE" Payload/iFreeRDP.app
+          zip -qry iFreeRDP-unsigned.ipa Payload
+          ls -lh iFreeRDP-unsigned.ipa
+
+      - name: Upload ipa artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: iFreeRDP-unsigned-ipa
+          path: iFreeRDP-unsigned.ipa
+          if-no-files-found: error
