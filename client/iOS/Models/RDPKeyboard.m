@@ -225,6 +225,16 @@
 	[self notifyDelegateModifiersChanged];
 }
 
+// send a windows key plus key combination (e.g. win+r or win+g)
+- (void)sendWinKeyComboWithVirtualKey:(NSInteger)vKey
+{
+	// hold the windows key down for the duration of the key stroke
+	[self sendVirtualKey:(VK_LWIN | KBDEXT) up:NO];
+	[self sendVirtualKey:vKey up:NO];
+	[self sendVirtualKey:vKey up:YES];
+	[self sendVirtualKey:(VK_LWIN | KBDEXT) up:YES];
+}
+
 #pragma mark Sending special key strokes
 
 - (void)sendEnterKeyStroke

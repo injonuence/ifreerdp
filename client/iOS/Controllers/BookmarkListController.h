@@ -15,6 +15,9 @@
 #import "BookmarkEditorController.h"
 #import "Reachability.h"
 
+// posted when the bookmark store was updated outside the list controller
+extern NSString *const TSXBookmarksStoreDidUpdateNotification;
+
 @interface BookmarkListController : UIViewController <UISearchBarDelegate, UITableViewDelegate,
                                                       UITableViewDataSource, BookmarkEditorDelegate>
 {
@@ -52,5 +55,8 @@
 @property(nonatomic, retain) IBOutlet UITableView *tableView;
 @property(nonatomic, retain) IBOutlet BookmarkTableCell *bmTableCell;
 @property(nonatomic, retain) IBOutlet SessionTableCell *sessTableCell;
+
+// upserts the credentials of the given bookmark into the manual bookmark store
++ (void)updateOrSaveBookmarkCredentials:(ComputerBookmark *)updated_bookmark;
 
 @end

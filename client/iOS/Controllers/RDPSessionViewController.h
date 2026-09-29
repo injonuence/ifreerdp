@@ -50,6 +50,9 @@
 	AdvancedKeyboardView *_advanced_keyboard_view;
 	CGSize _last_session_viewport_size;
 
+	// credentials entered at the login prompt, saved to the bookmark after connecting
+	NSMutableDictionary *_entered_credentials_params;
+
 	CGPoint _prev_long_press_position;
 	CGPoint _cursor_view_position;
 	CGPoint _last_mouse_pan_location;

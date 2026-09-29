@@ -58,6 +58,9 @@
 // send a single key down or up event for the given virtual key code
 - (void)sendVirtualKey:(NSInteger)vKey up:(BOOL)up;
 
+// send a windows key plus key combination (e.g. win+r or win+g)
+- (void)sendWinKeyComboWithVirtualKey:(NSInteger)vKey;
+
 // toggle ctrl key, returns true if pressed, otherwise false
 - (void)toggleCtrlKey;
 

@@ -16,6 +16,8 @@
 #import "Reachability.h"
 #import "GlobalDefaults.h"
 
+NSString *const TSXBookmarksStoreDidUpdateNotification = @"TSXBookmarksStoreDidUpdate";
+
 #define SECTION_SESSIONS 0
 #define SECTION_BOOKMARKS 1
 #define NUM_SECTIONS 2
@@ -65,6 +67,13 @@
 		[[NSNotificationCenter defaultCenter] addObserver:self
 		                                         selector:@selector(sessionFailedToConnect:)
 		                                             name:TSXSessionDidFailToConnectNotification
+		                                           object:nil];
+
+		// reload the list when the store was written from outside (e.g. credentials saved
+		// by the session controller after a successful login)
+		[[NSNotificationCenter defaultCenter] addObserver:self
+		                                         selector:@selector(bookmarksStoreDidUpdate:)
+		                                             name:TSXBookmarksStoreDidUpdateNotification
 		                                           object:nil];
 
 		// set title and tabbar controller image
@@ -717,7 +726,18 @@
 
 	// if session's bookmark is not in the bookmark list ask the user if he wants to add it
 	// (this happens if the session is created using the quick connect feature)
-	if (![_manual_bookmarks containsObject:[session bookmark]])
+	NSString *session_hostname = [[[session bookmark] params] StringForKey:@"hostname"];
+	BOOL bookmark_stored = [_manual_bookmarks containsObject:[session bookmark]];
+	for (ComputerBookmark *stored_bookmark in _manual_bookmarks)
+	{
+		if ([session_hostname length] > 0 &&
+		    [[[stored_bookmark params] StringForKey:@"hostname"] isEqualToString:session_hostname])
+		{
+			bookmark_stored = YES;
+			break;
+		}
+	}
+	if (!bookmark_stored)
 	{
 		// retain the bookmark in case we want to save it later
 		_temporary_bookmark = [[session bookmark] retain];
@@ -990,6 +1010,82 @@
 
 	// the decoded array is immutable, but callers mutate the result
 	return [[NSMutableArray alloc] initWithArray:decoded];
+}
+
+// upserts the credentials of the given bookmark into the manual bookmark store, matched
+// by hostname; quick connect bookmarks without a stored counterpart are added
++ (void)updateOrSaveBookmarkCredentials:(ComputerBookmark *)updated_bookmark
+{
+	if (updated_bookmark == nil)
+		return;
+
+	NSString *hostname = [[updated_bookmark params] StringForKey:@"hostname"];
+	NSURL *store_url = [NSURL
+	    fileURLWithPath:[NSString stringWithFormat:@"%@/%@",
+	                                               [NSSearchPathForDirectoriesInDomains(
+	                                                   NSDocumentDirectory, NSUserDomainMask, YES)
+	                                                   lastObject],
+	                                               @"com.freerdp.ifreerdp.bookmarks.plist"]];
+
+	NSMutableArray *stored_bookmarks = [[NSMutableArray alloc] init];
+	NSSet *decoded_classes = [NSSet setWithObjects:[NSArray class], [ComputerBookmark class],
+	                                         [ConnectionParams class], [NSDictionary class],
+	                                         [NSString class], [NSNumber class], [NSData class], nil];
+	NSData *archived_data = [NSData dataWithContentsOfURL:store_url];
+	if (archived_data != nil)
+	{
+		NSArray *decoded_bookmarks = [NSKeyedUnarchiver unarchivedObjectOfClasses:decoded_classes
+		                                                                  fromData:archived_data
+		                                                                     error:nil];
+		if (decoded_bookmarks != nil)
+			[stored_bookmarks addObjectsFromArray:decoded_bookmarks];
+	}
+
+	ComputerBookmark *matching_bookmark = nil;
+	for (ComputerBookmark *stored_bookmark in stored_bookmarks)
+	{
+		if ([hostname length] > 0 &&
+		    [[[stored_bookmark params] StringForKey:@"hostname"] isEqualToString:hostname])
+		{
+			matching_bookmark = stored_bookmark;
+			break;
+		}
+	}
+
+	if (matching_bookmark == nil)
+		[stored_bookmarks addObject:updated_bookmark];
+	else
+	{
+		[[matching_bookmark params] setValue:[[updated_bookmark params] StringForKey:@"username"]
+		                             forKey:@"username"];
+		[[matching_bookmark params] setValue:[[updated_bookmark params] StringForKey:@"password"]
+		                             forKey:@"password"];
+		[[matching_bookmark params] setValue:[[updated_bookmark params] StringForKey:@"domain"]
+		                             forKey:@"domain"];
+	}
+
+	NSError *archive_error = nil;
+	NSData *updated_data = [NSKeyedArchiver archivedDataWithRootObject:stored_bookmarks
+	                                                 requiringSecureCoding:YES
+	                                                                 error:&archive_error];
+	if (updated_data != nil)
+	{
+		[updated_data writeToURL:store_url atomically:YES];
+		[[NSNotificationCenter defaultCenter] postNotificationName:TSXBookmarksStoreDidUpdateNotification
+		                                                    object:nil];
+	}
+	else
+		NSLog(@"%s: failed to archive bookmarks: %@", __func__, archive_error);
+
+	[stored_bookmarks release];
+}
+
+// reloads the bookmark list after the store was updated from outside
+- (void)bookmarksStoreDidUpdate:(NSNotification *)notification
+{
+	(void)notification;
+	[self readManualBookmarksFromDataStore];
+	[self.tableView reloadData];
 }
 
 - (NSURL *)manualBookmarksDataStoreURL

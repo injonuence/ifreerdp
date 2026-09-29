@@ -16,6 +16,8 @@
 #import "RDPKeyboard.h"
 #import "Utils.h"
 #import "Toast+UIView.h"
+#import "Bookmark.h"
+#import "BookmarkListController.h"
 #import "ConnectionParams.h"
 #import "CredentialsInputController.h"
 #import "VerifyCertificateController.h"
@@ -23,9 +25,38 @@
 #define TOOLBAR_HEIGHT 44
 #define ADVANCED_KEYBOARD_HEIGHT 200
 
+// renders the vector windows logo used for the win key toolbar button
+static UIImage *WindowsLogoImage(void)
+{
+	static UIImage *windows_logo_image = nil;
+	if (windows_logo_image == nil)
+	{
+		const CGFloat side = 40.0;
+		const CGFloat gap = 4.0;
+		const CGFloat pane = (side - gap) * 0.5;
+		UIGraphicsImageRenderer *renderer = [[[UIGraphicsImageRenderer alloc]
+		    initWithSize:CGSizeMake(side, side)] autorelease];
+		UIImage *rendered_image = [renderer imageWithActions:^(
+		    UIGraphicsImageRendererContext *renderer_context) {
+			[[UIColor whiteColor] setFill];
+			[[UIBezierPath bezierPathWithRoundedRect:CGRectMake(0.0, 0.0, pane, pane)
+			                             cornerRadius:2.0] fill];
+			[[UIBezierPath bezierPathWithRoundedRect:CGRectMake(pane + gap, 0.0, pane, pane)
+			                             cornerRadius:2.0] fill];
+			[[UIBezierPath bezierPathWithRoundedRect:CGRectMake(0.0, pane + gap, pane, pane)
+			                             cornerRadius:2.0] fill];
+			[[UIBezierPath bezierPathWithRoundedRect:CGRectMake(pane + gap, pane + gap, pane, pane)
+			                             cornerRadius:2.0] fill];
+		}];
+		windows_logo_image = [rendered_image retain];
+	}
+	return windows_logo_image;
+}
+
 @interface RDPSessionViewController (Private)
 - (void)showSessionToolbar:(BOOL)show;
 - (UIToolbar *)keyboardToolbar;
+- (NSArray *)sessionToolbarItems;
 - (void)initGestureRecognizers;
 - (void)suspendSession;
 - (void)fitSessionViewToViewport;
@@ -39,6 +70,8 @@
 - (void)moveCursorByViewportDelta:(CGPoint)delta;
 - (void)moveCursorToSessionViewPosition:(CGPoint)position;
 - (void)sendMouseButtonEvent:(int)event;
+- (void)pressWinRCombo:(id)sender;
+- (void)pressWinGCombo:(id)sender;
 - (BOOL)isKeyboardActive;
 @end
 
@@ -85,6 +118,9 @@
 	object_setClass(_session_toolbar, [RDPSessionToolbar class]);
 	[(RDPSessionToolbar *)_session_toolbar setPassthroughView:_session_scrollview];
 
+	// rebuild the session toolbar items with sharp vector icons and ready made key combos
+	[_session_toolbar setItems:[self sessionToolbarItems]];
+
 	// init keyboard toolbar
 	_keyboard_toolbar = [[self keyboardToolbar] retain];
 	[_dummy_textfield setInputAccessoryView:_keyboard_toolbar];
@@ -116,7 +152,8 @@
 {
 	[super viewDidLayoutSubviews];
 
-	CGRect viewportFrame = [[self view] bounds];
+	// keep the remote viewport inside the safe area (notch / dynamic island / home indicator)
+	CGRect viewportFrame = UIEdgeInsetsInsetRect([[self view] bounds], [[self view] safeAreaInsets]);
 	[_session_scrollview setFrame:viewportFrame];
 
 	CGSize viewportSize = [_session_scrollview bounds].size;
@@ -234,6 +271,7 @@
 	[_session setDelegate:nil];
 
 	[_advanced_keyboard_view release];
+	[_entered_credentials_params release];
 	[_keyboard_toolbar release];
 	[_session release];
 	[super dealloc];
@@ -431,6 +469,23 @@
 		                               width, height, depth];
 		[[self view] makeToast:message duration:ToastDurationNormal position:@"bottom"];
 	}
+
+	// persist credentials entered at the login prompt into the bookmark store
+	if (_entered_credentials_params != nil &&
+	    [[_entered_credentials_params objectForKey:@"username"] length] > 0)
+	{
+		ConnectionParams *bookmark_params = [[session bookmark] params];
+		[bookmark_params setValue:[_entered_credentials_params objectForKey:@"username"]
+		                 forKey:@"username"];
+		[bookmark_params setValue:[_entered_credentials_params objectForKey:@"password"]
+		                 forKey:@"password"];
+		[bookmark_params setValue:[_entered_credentials_params objectForKey:@"domain"]
+		                 forKey:@"domain"];
+		[BookmarkListController updateOrSaveBookmarkCredentials:[session bookmark]];
+
+		[_entered_credentials_params release];
+		_entered_credentials_params = nil;
+	}
 }
 
 - (void)sessionWillDisconnect:(RDPSession *)session
@@ -527,6 +582,10 @@
 
 - (void)session:(RDPSession *)session requestsAuthenticationWithParams:(NSMutableDictionary *)params
 {
+	// keep the entered credentials around to save them into the bookmark after connecting
+	[_entered_credentials_params autorelease];
+	_entered_credentials_params = [params retain];
+
 	CredentialsInputController *view_controller =
 	    [[[CredentialsInputController alloc] initWithNibName:@"CredentialsInputView"
 	                                                  bundle:nil
@@ -548,7 +607,7 @@
 - (CGSize)sizeForFitScreenForSession:(RDPSession *)session
 {
 	// set remote resolution that matches the on-screen viewport.
-	CGSize size = [self view].bounds.size;
+	CGSize size = UIEdgeInsetsInsetRect([[self view] bounds], [[self view] safeAreaInsets]).size;
 	UIScreen *screen = [[self view] window] ? [[[self view] window] screen] : [UIScreen mainScreen];
 	CGFloat scale =
 	    [screen respondsToSelector:@selector(nativeScale)] ? [screen nativeScale] : [screen scale];
@@ -618,6 +677,18 @@
 	[[RDPKeyboard getSharedRDPKeyboard] toggleWinKey];
 }
 
+// send the win+r key combo (run dialog)
+- (IBAction)pressWinRCombo:(id)sender
+{
+	[[RDPKeyboard getSharedRDPKeyboard] sendWinKeyComboWithVirtualKey:'R'];
+}
+
+// send the win+g key combo (game bar)
+- (IBAction)pressWinGCombo:(id)sender
+{
+	[[RDPKeyboard getSharedRDPKeyboard] sendWinKeyComboWithVirtualKey:'G'];
+}
+
 - (IBAction)toggleShiftKey:(id)sender
 {
 	[[RDPKeyboard getSharedRDPKeyboard] toggleShiftKey];
@@ -682,13 +753,32 @@
 
 - (void)keyboardWillShow:(NSNotification *)notification
 {
-	(void)notification;
+	NSValue *keyboard_frame_value =
+	    [[notification userInfo] objectForKey:UIKeyboardFrameEndUserInfoKey];
+	if (keyboard_frame_value == nil)
+	{
+		[self centerSessionViewInViewport];
+		return;
+	}
+
+	// inset the viewport by the keyboard overlap so the remote screen stays reachable
+	CGRect keyboard_frame = [keyboard_frame_value CGRectValue];
+	keyboard_frame = [[self view] convertRect:keyboard_frame fromView:nil];
+	CGFloat keyboard_overlap =
+	    MAX(0.0, CGRectGetMaxY([_session_scrollview frame]) - CGRectGetMinY(keyboard_frame));
+	UIEdgeInsets content_inset = UIEdgeInsetsMake(0.0, 0.0, keyboard_overlap, 0.0);
+	[_session_scrollview setContentInset:content_inset];
+	[_session_scrollview setScrollIndicatorInsets:content_inset];
 	[self centerSessionViewInViewport];
 }
 
 - (void)keyboardWillHide:(NSNotification *)notification
 {
 	(void)notification;
+
+	// remove the keyboard inset so the viewport uses the full safe area again
+	[_session_scrollview setContentInset:UIEdgeInsetsZero];
+	[_session_scrollview setScrollIndicatorInsets:UIEdgeInsetsZero];
 	[self centerSessionViewInViewport];
 }
 
@@ -800,10 +890,26 @@
 			_mouse_drag_active = YES;
 		}
 
-		CGPoint delta = CGPointMake(location.x - _last_mouse_pan_location.x,
-		                            location.y - _last_mouse_pan_location.y);
-		[self moveCursorByViewportDelta:delta];
-		_last_mouse_pan_location = location;
+		// process every coalesced touch sample so the cursor tracks the finger smoothly
+		NSArray *coalesced_touches = [gesture coalescedTouches];
+		if ([coalesced_touches count] > 0)
+		{
+			for (UITouch *touch in coalesced_touches)
+			{
+				CGPoint touch_location = [touch locationInView:_session_scrollview];
+				CGPoint delta = CGPointMake(touch_location.x - _last_mouse_pan_location.x,
+				                            touch_location.y - _last_mouse_pan_location.y);
+				[self moveCursorByViewportDelta:delta];
+				_last_mouse_pan_location = touch_location;
+			}
+		}
+		else
+		{
+			CGPoint delta = CGPointMake(location.x - _last_mouse_pan_location.x,
+			                            location.y - _last_mouse_pan_location.y);
+			[self moveCursorByViewportDelta:delta];
+			_last_mouse_pan_location = location;
+		}
 	}
 	else if ([gesture state] == UIGestureRecognizerStateEnded ||
 	         [gesture state] == UIGestureRecognizerStateCancelled ||
@@ -937,6 +1043,11 @@
 	    sessionFrame.size.width <= 0.0f || sessionFrame.size.height <= 0.0f)
 		return;
 
+	// subtract the keyboard inset so the session stays centered in the visible area
+	UIEdgeInsets viewport_inset = [_session_scrollview contentInset];
+	viewportSize.width -= viewport_inset.left + viewport_inset.right;
+	viewportSize.height -= viewport_inset.top + viewport_inset.bottom;
+
 	sessionFrame.origin.x = MAX((viewportSize.width - sessionFrame.size.width) * 0.5f, 0.0f);
 	sessionFrame.origin.y = MAX((viewportSize.height - sessionFrame.size.height) * 0.5f, 0.0f);
 	[_session_view setFrame:sessionFrame];
@@ -994,9 +1105,7 @@
 	                                      style:UIBarButtonItemStylePlain
 	                                     target:self
 	                                     action:@selector(pressEscKey:)] autorelease];
-	UIImage *win_icon =
-	    [UIImage imageWithContentsOfFile:[[NSBundle mainBundle] pathForResource:@"toolbar_icon_win"
-	                                                                     ofType:@"png"]];
+	UIImage *win_icon = WindowsLogoImage();
 	UIBarButtonItem *win_btn =
 	    [[[UIBarButtonItem alloc] initWithImage:win_icon
 	                                      style:UIBarButtonItemStylePlain
@@ -1049,6 +1158,52 @@
 	[keyboard_toolbar setItems:items];
 	[keyboard_toolbar sizeToFit];
 	return keyboard_toolbar;
+}
+
+// rebuild the session toolbar items with sharp vector icons and ready made key combos
+- (NSArray *)sessionToolbarItems
+{
+	UIBarButtonItem *keyboard_item =
+	    [[[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"keyboard"]
+	                                      style:UIBarButtonItemStylePlain
+	                                     target:self
+	                                     action:@selector(toggleKeyboard:)] autorelease];
+	UIBarButtonItem *win_r_item =
+	    [[[UIBarButtonItem alloc] initWithTitle:@"Win+R"
+	                                      style:UIBarButtonItemStylePlain
+	                                     target:self
+	                                     action:@selector(pressWinRCombo:)] autorelease];
+	UIBarButtonItem *win_g_item =
+	    [[[UIBarButtonItem alloc] initWithTitle:@"Win+G"
+	                                      style:UIBarButtonItemStylePlain
+	                                     target:self
+	                                     action:@selector(pressWinGCombo:)] autorelease];
+	UIBarButtonItem *shift_item =
+	    [[[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"arrow.up"]
+	                                      style:UIBarButtonItemStylePlain
+	                                     target:self
+	                                     action:@selector(toggleShiftKey:)] autorelease];
+	UIBarButtonItem *switch_item =
+	    [[[UIBarButtonItem alloc]
+	        initWithImage:[UIImage systemImageNamed:@"arrow.down.right.and.arrow.up.left"]
+	                  style:UIBarButtonItemStylePlain
+	                 target:self
+	                 action:@selector(switchSession:)] autorelease];
+	UIBarButtonItem *disconnect_item =
+	    [[[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"xmark.circle"]
+	                                      style:UIBarButtonItemStylePlain
+	                                     target:self
+	                                     action:@selector(disconnectSession:)] autorelease];
+	UIBarButtonItem *flex_spacer =
+	    [[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace
+	                                                   target:nil
+	                                                   action:nil] autorelease];
+
+	NSArray *toolbar_items =
+	    [NSArray arrayWithObjects:keyboard_item, flex_spacer, win_r_item, flex_spacer, win_g_item,
+	                              flex_spacer, shift_item, flex_spacer, switch_item, flex_spacer,
+	                              disconnect_item, nil];
+	return toolbar_items;
 }
 
 - (void)initGestureRecognizers
